@@ -1,0 +1,45 @@
+FROM docker.io/arm64v8/ros:iron-ros-base
+
+ARG S6_OVERLAY_VERSION=3.1.5.0
+
+RUN  echo "deb http://mirrors.nju.edu.cn/ubuntu-ports jammy main universe multiverse restricted\ndeb http://mirrors.nju.edu.cn/ubuntu-ports jammy-security main universe multiverse restricted\ndeb http://mirrors.nju.edu.cn/ubuntu-ports jammy-updates main universe multiverse restricted"> /etc/apt/sources.list \
+&&   echo "deb http://mirrors.cqu.edu.cn/ros2/ubuntu jammy main" > /etc/apt/sources.list.d/ros2-latest.list \
+&&   apt-get update \
+&&   apt-get install ssh curl vim tini -y \
+&&   apt-get install ros-iron-foxglove-bridge ros-iron-rosbridge-suite -y \
+&&   apt-get clean \
+&&   find /var/log/ -type f -delete
+
+# <https://github.com/just-containers/s6-overlay>
+RUN  curl -L https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz > /tmp/s6-overlay-noarch.tar.xz \
+&&   curl -L https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-aarch64.tar.xz > /tmp/s6-overlay-aarch64.tar.xz \
+&&   tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz \
+&&   tar -C / -Jxpf /tmp/s6-overlay-aarch64.tar.xz \
+&&   rm -rf /tmp/*
+
+RUN  echo "source /opt/ros/$ROS_DISTRO/setup.bash" >> /root/.bashrc
+
+# <https://github.com/antoineco/sshd-s6-docker>
+COPY etc/ /etc
+
+ARG USER_SSH_PUBKEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEJs5wNeBjDuCMZyK3kzXvsN40WIzF/1n8/P+VqHCOk3"
+RUN  mkdir -p /root/.ssh \
+&&   mkdir -p /root/work \
+&&   echo "${USER_SSH_PUBKEY}" > /root/.ssh/authorized_keys
+
+RUN  apt-get update \
+&&   apt-get install libasio-dev can-utils -y \
+&&   apt-get install ros-iron-velodyne ros-iron-librealsense2 ros-iron-realsense2-camera --no-install-recommends -y \
+&&   apt-get clean \
+&&   find /var/log/ -type f -delete
+
+#COPY bin/ /root/.vscodium-server/bin/
+#RUN  tar zxf $(find /root/.vscodium-server/bin/ -name '*.tar.gz')
+RUN /etc/user_script/code-server.sh
+
+ENV S6_KEEP_ENV=1
+EXPOSE 2222 8765
+WORKDIR /root/work
+# This is s6-overlay
+ENTRYPOINT ["/init"]
+CMD ["tini", "-s", "/etc/user_script/workspace_entrypoint.sh", "ros2", "launch", "foxglove_bridge", "foxglove_bridge_launch.xml", "address:=127.0.0.1"]
